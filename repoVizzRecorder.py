@@ -1,5 +1,7 @@
+import os
 import os.path
-
+from tempfile import mkdtemp
+import re
 # Data sources
 
 # BITalino
@@ -13,7 +15,7 @@ except ImportError:
 
 # config: possible BITalino serial devices
 #
-devices = ["/dev/rfcomm0", "/dev/tty.bitalino-DevB"]
+devices = ["/dev/rfcomm0", "/dev/tty.bitalino-DevB", "/dev/tty.BITalino-DevB"]
 BITalino_SamplingRate = 1000
 BITalino_nSamples = 50
 
@@ -53,9 +55,9 @@ def BITalino_source():
     #    device.trigger([0,0,0,1])
     while True:
         data = device.read(BITalino_nSamples)
-        for n in range(data.shape()[1]):
+        for n in range(data.shape[1]):
             for signal, label in enumerate(labels):
-                yield label, data[signal][data]
+                yield label, data[signal][n]
 
     # device.stop()
     # device.close()
@@ -91,5 +93,54 @@ def test_a_source(source):
     for label, data in s:
         print label, data
 
+sanitize_name_pattern = re.compile('[\W_]+')
+def sanitize_name(n):
+    return sanitize_name_pattern.sub('_', n)
+
+def record_a_source(source):
+    s = source()
+    conf = next(s)
+    print "CONF:", conf
+    minmax = {}
+    files = {}
+    mydir = "recording"
+    i = 0
+    while os.path.exists(mydir):
+        mydir = "recording_{}".format(i)
+        i += 1
+    os.makedirs(mydir)
+    print "Recording in", mydir
+    try:
+        for label, data in s:
+            if label not in minmax:
+                minmax[label]=(data,data)
+                files[label] = open(os.path.join(mydir,sanitize_name(label)+'.csv_0'),'wb')
+            else:
+                mi, ma = minmax[label]
+                minmax[label] = (min(mi,data),max(ma,data))
+            files[label].write('{},\n'.format(data))
+    except KeyboardInterrupt:
+        pass
+
+    # let's close files
+
+    for f in files.values():
+        f.close()
+
+    # let's create the real csv
+
+    for label, mm in minmax.items():
+        fname = os.path.join(mydir,sanitize_name(label)+'.csv')
+        with open(fname,'wb') as realfile:
+            realfile.write("min={},max={}\n".format(*mm))
+            with open(fname+'_0','rb') as rfile:
+                for l in rfile:
+                    realfile.write(l)
+            os.remove(fname+'_0')
+
+
+
+
+
 if __name__ == "__main__":
-    test_a_source(R_IoT_source)
+    record_a_source(BITalino_source)
