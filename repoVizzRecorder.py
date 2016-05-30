@@ -51,7 +51,8 @@ def BITalino_source():
     # first yield is conf
     yield dict(sampling_rate=BITalino_SamplingRate)
 
-    labels = ["D0", "D1", "D2", "D3", "A0", "A2", "A3", "A4", "A5"]
+    labels = ["Digital/D0", "Digital/D1", "Digital/D2", "Digital/D3",
+              "Analog/A0", "Analog/A2", "Analog/A3", "Analog/A4", "Analog/A5"]
 
     # led ON
     #    device.trigger([0,0,0,1])
@@ -111,6 +112,7 @@ class Record(object):
         self.nelements = 0
         self.conf = conf
         self.add(data)
+        self.framerate = 0
 
     def add(self, data):
         self.end = time.clock()
@@ -151,9 +153,11 @@ class Record(object):
             else:
                 print "\tnot enough data to detect framerate, using specified:", rate
 
+            self.framerate = rate
+
             # repovizz header
 
-            realfile.write("repovizz, framerate={}, minval={}, maxval={}\n".format(rate, self.min, self.max))
+            realfile.write("repovizz,framerate={},minval={},maxval={}\n".format(rate, self.min, self.max))
 
             with open(self.fname+'_0', 'rb') as rfile:
                 data = rfile.read(4096)
@@ -207,6 +211,8 @@ def record_a_source(source):
 
     for f in records.values():
         f.save()
+
+    return mydir, records
 
 
 import scipy.io.wavfile as wav
@@ -270,7 +276,7 @@ def cut_video(recording_path, datapack_path):
 
 
 import zipfile
-import lxml.etree as etree
+import xml.etree.ElementTree as etree
 
 def get_csv_duration(csv_path):
     with open(csv_path, 'r') as f:
@@ -394,6 +400,78 @@ def upload_datapack(filename):
     print r.text
 
 
+def enumerate_siblings(father_node, child_node):
+    """ Calculates the number of nodes on the same level that will have the same ID, and returns the final number to be
+    appended (_0, _1 etc) """
+    siblings = father_node.findall("./")
+    sibling_counter = 0
+    for node in siblings:
+        if node.get('Category')[:4]==child_node.get('Category')[:4]:
+            sibling_counter += 1
+    return father_node.get('ID')+'_'+child_node.get('Category')[:4]+str(sibling_counter-1)
+
+
+def create_recorded_xml():
+    mypath, records = record_a_source(R_IoT_source)
+
+    IDS = {}
+
+    ROOT = etree.Element("ROOT")
+    ROOT.set("ID", "ROOT0")
+    for record in records.values():
+        labelcomponents = record.label.strip('/').split('/')
+        label = labelcomponents[-1]
+        groups = labelcomponents[:-1]
+        root = ROOT
+        prev = ["ROOT0"]
+        for g in groups:
+            node = None
+            name = g
+            prev.append(g)
+            node = IDS.get('_'.join(prev))
+            if not node:
+                node = etree.SubElement(root, "Generic", attrib=dict(
+                    Name=name,
+                    Category="SensorGroup",
+                    _Extra="",
+                    Expanded="1"
+                ))
+                node.set('ID', enumerate_siblings(root, node))
+                IDS['_'.join(prev)] = node
+
+            root = node
+        node = etree.SubElement(root, "Signal", attrib=dict(
+            NumSamples="",
+            Name=label,
+            BytesPerSample="",
+            _Extra="canvas=-1,color=0,selected=1",
+            Category="Sensor",
+            FileType="CSV",
+            FrameSize="",
+            DefaultPath="0",
+            SpecSampleRate="0.0",
+            EstimatedSampleRate="0.0",
+            MaxVal="",
+            Filename=os.path.basename(record.fname),
+            NumChannels="",
+            ResampledFlag="-1",
+            MinVal="",
+            Expanded="1",
+            SampleRate=str(record.framerate)
+        ))
+        node.set('ID', enumerate_siblings(root, node))
+
+    # Write the updated XML structure
+    with open(os.path.join(mypath, 'LoggedData.xml'), "w") as text_file:
+        text_file.write(etree.tostring(ROOT))
+
+    with zipfile.ZipFile(mypath+'.zip', 'w') as z:
+        zipdir(mypath, z)
+
+
+
+
 if __name__ == "__main__":
     # test_a_source(R_IoT_source)
-    record_a_source(R_IoT_source)
+    #record_a_source(R_IoT_source)
+    create_recorded_xml()
