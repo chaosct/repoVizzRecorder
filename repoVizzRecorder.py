@@ -169,7 +169,15 @@ class Record(object):
                     data = rfile.read(4096)
             os.remove(self.fname+'_0')
 
-from playsound import playsound
+from playsound import playsound as playsound_
+import sys
+import subprocess
+def playsound(f):
+    if sys.platform == "darwin":
+        playsound_(f)
+    else:
+        subprocess.call(['aplay',f])
+
 
 def record_a_source(source):
     s = source()
@@ -236,6 +244,7 @@ def samples_to_seconds(index, overlap, sr):
     """Convert STFT window positions to seconds"""
     return index*(float(1024)/overlap)/sr
 
+from matplotlib import pyplot
 
 def detect_start_end_times(pattern_wav, recording_wav, sr, overlap):
     """Find matches for the start/end pattern within the recorded audio"""
@@ -254,6 +263,8 @@ def detect_start_end_times(pattern_wav, recording_wav, sr, overlap):
 
     # Search for peaks in the confidence score, and choose the two highest peaks
     peaks = peakutils.indexes(confidence[0], thres=0.5, min_dist=50)
+    peaks = sorted(peaks, key=lambda p: confidence[0,p])[:2]
+    print "PEAKS:", peaks
     start, end = sorted(peaks)
     return samples_to_seconds(start, overlap, sr), samples_to_seconds(end, overlap, sr)
 
@@ -424,15 +435,15 @@ def record():
 
 @record.command()
 def RiOT():
-    record_a_source(R_IoT_source)
+    create_recorded_xml(R_IoT_source)
 
 @record.command()
 def BITalino():
-    record_a_source(BITalino_source)
+    create_recorded_xml(BITalino_source)
 
 @cli.command()
-@cli.argument('video_path')
-@cli.argument('datapack_path')
+@click.argument('video_path')
+@click.argument('datapack_path')
 def video(video_path, datapack_path):
     deletedir = False
     if os.path.isdir(datapack_path):
@@ -464,8 +475,8 @@ def enumerate_siblings(father_node, child_node):
     return father_node.get('ID')+'_'+child_node.get('Category')[:4]+str(sibling_counter-1)
 
 
-def create_recorded_xml():
-    mypath, records = record_a_source(R_IoT_source)
+def create_recorded_xml(source):
+    mypath, records = record_a_source(source)
 
     IDS = {}
 
@@ -528,3 +539,4 @@ if __name__ == "__main__":
     # test_a_source(R_IoT_source)
     # record_a_source(R_IoT_source)
     cli()
+    # video("/home/carles/Baixades/VID_20160601_183525430.mp4", "recording_22.zip")
