@@ -3,6 +3,9 @@ import os
 import os.path
 import time
 import threading
+import tempfile
+import shutil
+
 # Data sources
 
 # BITalino
@@ -131,10 +134,10 @@ class Record(object):
                 if self.min < 0:
                     self.max = -self.min
                 else:  # self.min == 0 and self.max == 0
-                    self.min = -1
-                    self.max = 1
+                    self.min = -1.
+                    self.max = 1.
             elif self.min >= 0:
-                self.min = 0
+                self.min = 0.
             else:  # self.min < 0
                 self.max = max(self.max, -self.min)
                 self.min = -self.max
@@ -153,7 +156,7 @@ class Record(object):
 
             # repovizz header
 
-            realfile.write("repovizz, framerate={}, minval={}, maxval={}\n".format(rate, self.min, self.max))
+            realfile.write("repovizz,framerate={},minval={},maxval={}\n".format(rate, self.min, self.max))
 
             with open(self.fname+'_0', 'rb') as rfile:
                 data = rfile.read(4096)
@@ -162,6 +165,7 @@ class Record(object):
                     data = rfile.read(4096)
             os.remove(self.fname+'_0')
 
+from playsound import playsound
 
 def record_a_source(source):
     s = source()
@@ -189,6 +193,9 @@ def record_a_source(source):
     thread = threading.Thread(target=reporter)
     thread.daemon = True
     thread.start()
+
+    playsound("pattern.wav")
+
     try:
         for label, data in s:
             if label not in records:
@@ -199,6 +206,8 @@ def record_a_source(source):
             total_received += 1
     except KeyboardInterrupt:
         pass
+
+    playsound("pattern.wav")
 
     running = False
     thread.join()
@@ -243,30 +252,31 @@ def detect_start_end_times(pattern_wav, recording_wav, sr, overlap):
     return samples_to_seconds(start, overlap, sr), samples_to_seconds(end, overlap, sr)
 
 
-def cut_video(recording_path, datapack_path):
-    datapack_folder = os.path.dirname(datapack_path)
+def cut_video(recording_path, datapack_dir):
 
     # Read the start/end pattern
     sr1, pattern_wav = wav.read('pattern.wav')
+
+    workingdir = tempfile.mkdtemp()
 
     # Open the video file
     clip = VideoFileClip(recording_path)
 
     # Save its audio track temporarily on disk
-    clip.audio.write_audiofile("temp_audio.wav")
+    clip.audio.write_audiofile(os.path.join(workingdir,"temp_audio.wav"))
 
     # Read the audio samples, mix down to mono (if necessary), and delete the temporary audio track
-    sr2, recording_wav = wav.read('temp_audio.wav')
+    sr2, recording_wav = wav.read(os.path.join(workingdir,"temp_audio.wav"))
     if recording_wav.shape[1]>1:
         recording_wav = numpy.mean(recording_wav,1)
-    os.remove('temp_audio.wav')
 
+    shutil.rmtree(workingdir)
     # Detect the start and end audio pattern
     start, end = detect_start_end_times(pattern_wav, recording_wav, sr2, 4)
 
     # Cut the video and write it into two separate video and audio files
-    clip.subclip(start+0.4, end).write_videofile(os.path.join(datapack_folder, 'temp','video.mp4'), codec='libx264')
-    clip.subclip(start+0.4, end).audio.write_audiofile(os.path.join(datapack_folder, 'temp','audio.wav'))
+    clip.subclip(start+0.4, end).write_videofile(os.path.join(datapack_dir, 'video.mp4'), codec='libx264')
+    clip.subclip(start+0.4, end).audio.write_audiofile(os.path.join(datapack_dir,'audio.wav'))
 
 
 import zipfile
@@ -293,26 +303,29 @@ def zipdir(path, zip_handle):
         for file in files:
             zip_handle.write(os.path.join(root, file),file)
 
-def modify_datapack(datapack_path, recording_path):
-    datapack_folder = os.path.dirname(datapack_path)
+def modify_datapack(datapack_dir, target_filename):
 
-    # Unzip the datapack into a temp folder
-    with zipfile.ZipFile(datapack_path, "r") as z:
-        z.extractall(os.path.join(datapack_folder, 'temp'))
 
     # Get the duration of each csv file, and it
     durations = []
-    for f in os.listdir(os.path.join(datapack_folder, 'temp')):
+    xmlfile = None
+    for f in os.listdir(datapack_dir):
         if f.endswith(".csv"):
-            durations.append(get_csv_duration(os.path.join(datapack_folder,'temp',f)))
+            durations.append(get_csv_duration(os.path.join(datapack_dir,f)))
+        elif f.endswith(".xml"):
+            xmlfile = f
+
+    if not xmlfile:
+        print "Couldn't find thexml in datapack. aborting..."
+        return
 
     print 'Datapack length (according to the .csv files): ' + ''.join(str(e) for e in list(set(durations)))
 
-    sr, audiofile = wav.read(os.path.join(datapack_folder, 'temp','audio.wav'))
+    sr, audiofile = wav.read(os.path.join(datapack_dir,'audio.wav'))
     num_channels = audiofile.shape[1]
 
     # Load the XML file
-    tree = etree.parse(os.path.join(datapack_folder, 'temp', 'LoggedData.xml'))
+    tree = etree.parse(os.path.join(datapack_dir, xmlfile))
     root = tree.getroot()
 
     # Create a External node
@@ -358,12 +371,12 @@ def modify_datapack(datapack_path, recording_path):
     root.insert(0,external_node)
 
     # Write the updated XML structure
-    with open(os.path.join(datapack_folder, 'temp', 'LoggedData.xml'), "w") as text_file:
+    with open(os.path.join(datapack_dir, xmlfile), "w") as text_file:
         text_file.write(etree.tostring(root))
 
     # Re-zip the datapack
-    with zipfile.ZipFile(datapack_path[:-4]+'_video_audio.zip', 'w') as z:
-        zipdir(os.path.join(datapack_folder, 'temp'), z)
+    with zipfile.ZipFile(target_filename, 'w') as z:
+        zipdir(datapack_dir, z)
 
 import requests
 
@@ -393,7 +406,48 @@ def upload_datapack(filename):
 
     print r.text
 
+import click
+
+@click.group()
+def cli():
+    pass
+
+@cli.group()
+def record():
+    pass
+
+@record.command()
+def RiOT():
+    record_a_source(R_IoT_source)
+
+@record.command()
+def BITalino():
+    record_a_source(BITalino_source)
+
+@cli.command()
+@cli.argument('video_path')
+@cli.argument('datapack_path')
+def video(video_path, datapack_path):
+    deletedir = False
+    if os.path.isdir(datapack_path):
+        print "Using {} as a diectory".format(datapack_path)
+        datapack_dir = datapack_path
+        target_filename = datapack_dir+".zip"
+    elif os.path.isfile(datapack_path) and os.path.splitext(datapack_path)[1]=='.zip':
+        print "Using {} as a zip file".format(datapack_path)
+        datapack_dir = tempfile.mkdtemp()
+        target_filename = os.path.splitext(datapack_path)[0]+"-AudioVideo.zip"
+        deletedir = True
+        with zipfile.ZipFile(datapack_path, "r") as z:
+            z.extractall(datapack_dir)
+    print "Cutting video"
+    cut_video(video_path, datapack_dir)
+    print "Modifying datapack xml"
+    modify_datapack(datapack_dir, target_filename)
+    if deletedir:
+        shutil.rmtree(datapack_dir)
 
 if __name__ == "__main__":
     # test_a_source(R_IoT_source)
-    record_a_source(R_IoT_source)
+    # record_a_source(R_IoT_source)
+    cli()
