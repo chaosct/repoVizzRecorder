@@ -244,7 +244,9 @@ def samples_to_seconds(index, overlap, sr):
     """Convert STFT window positions to seconds"""
     return index*(float(1024)/overlap)/sr
 
-from matplotlib import pyplot
+def seconds_to_samples(second, overlap, sr):
+    """Convert seconds to STFT window positions"""
+    return second*(sr/(float(1024)/overlap))
 
 def detect_start_end_times(pattern_wav, recording_wav, sr, overlap):
     """Find matches for the start/end pattern within the recorded audio"""
@@ -262,10 +264,19 @@ def detect_start_end_times(pattern_wav, recording_wav, sr, overlap):
     confidence = match_template(recording, pattern)
 
     # Search for peaks in the confidence score, and choose the two highest peaks
-    peaks = peakutils.indexes(confidence[0], thres=0.5, min_dist=50)
-    peaks = sorted(peaks, key=lambda p: confidence[0,p])[:2]
-    print "PEAKS:", peaks
-    start, end = sorted(peaks)
+    # Minimum distance between consecutive peaks is set to 1 second
+    peaks = peakutils.indexes(confidence[0], thres=0, min_dist=seconds_to_samples(1, overlap, sr))
+    peaks = sorted(peaks, key=lambda p: -confidence[0,p])[:2]
+
+    #TODO: throw errors instead of printing, if necessary
+    if len(peaks) < 1:
+        print "Could not detect a starting beep!"
+    elif len(peaks) < 2:
+        print "Could only detect one starting beep!"
+    else:
+        start, end = sorted(peaks)
+        print "Initial beep detected at " + "%.3f" % samples_to_seconds(start, overlap, sr) + " seconds."
+        print "Final beep detected at " + "%.3f" % samples_to_seconds(end, overlap, sr) + " seconds."
     return samples_to_seconds(start, overlap, sr), samples_to_seconds(end, overlap, sr)
 
 
