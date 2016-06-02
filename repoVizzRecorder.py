@@ -110,7 +110,7 @@ class Record(object):
         self.max = data
         self.fname = fname
         self.file = open(fname+'_0', 'wb')
-        self.begin = time.clock()
+        self.begin = time.time()
         self.end = 0.0
         self.nelements = 0
         self.conf = conf
@@ -118,7 +118,7 @@ class Record(object):
         self.framerate = 0
 
     def add(self, data):
-        self.end = time.clock()
+        self.end = time.time()
         self.min = min(self.min, data)
         self.max = max(self.max, data)
         self.nelements += 1
@@ -152,6 +152,8 @@ class Record(object):
             rate = self.conf["sampling_rate"]
             if self.begin != self.end:
                 rate = (self.nelements-1)/(self.end-self.begin)
+                print "\tduration:",  (self.end-self.begin)
+                print "\tdatapoints:", self.nelements-1
                 print "\tdetected framerate:", rate
             else:
                 print "\tnot enough data to detect framerate, using specified:", rate
