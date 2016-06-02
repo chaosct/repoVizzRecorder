@@ -6,6 +6,9 @@ import threading
 import tempfile
 import shutil
 
+import requests
+import click
+
 # Data sources
 
 # BITalino
@@ -48,11 +51,12 @@ def BITalino_source():
 
     # print "Device version:"
     # print device.version()
-    # Start Acquisition in all Analog Channels
-    device.start()
 
     # first yield is conf
     yield dict(sampling_rate=BITalino_SamplingRate)
+
+    # Start Acquisition in all Analog Channels
+    device.start()
 
     labels = ["Digital/D0", "Digital/D1", "Digital/D2", "Digital/D3",
               "Analog/A0", "Analog/A2", "Analog/A3", "Analog/A4", "Analog/A5"]
@@ -75,6 +79,9 @@ import OSC
 
 def R_IoT_source():
     OSC.OSCServer.timeout = None # this is ugly, but you should be able to modify this in the constructor...
+
+    yield dict(sampling_rate=1500)
+
     server = OSC.OSCServer(("", 8888))
     lastdata = []
 
@@ -83,8 +90,6 @@ def R_IoT_source():
             lastdata.append(("{}/{}".format(addr,n), element))
 
     server.addMsgHandler("default", handle_data)
-
-    yield dict(sampling_rate=1500)
 
     while True:
         server.handle_request()
@@ -349,7 +354,7 @@ def modify_datapack(datapack_dir, target_filename):
         print "Couldn't find thexml in datapack. aborting..."
         return
 
-    print 'Datapack length (according to the .csv files): ' + ''.join(str(e) for e in list(set(durations)))
+    print 'Datapack length (according to the .csv files): ' + ' '.join(str(e) for e in list(set(durations)))
 
     sr, audiofile = wav.read(os.path.join(datapack_dir,'audio.wav'))
     num_channels = audiofile.shape[1]
@@ -408,25 +413,39 @@ def modify_datapack(datapack_dir, target_filename):
     with zipfile.ZipFile(target_filename, 'w') as z:
         zipdir(datapack_dir, z)
 
-import requests
 
-def upload_datapack(filename):
+
+@click.group()
+def cli():
+    pass
+
+@cli.command()
+@click.argument("datapack")
+def upload(datapack):
     # Read the api key from disk
-    with open('assets/api_key.txt', 'r') as myfile:
-        api_key=myfile.read().replace('\n', '')
+    apipath = 'api_key.txt'
+    if os.path.isfile(apipath):
+        with open(apipath, 'r') as myfile:
+            api_key=myfile.read().replace('\n', '')
+    else:
+        api_key=raw_input("Please enter your repoVizz API key: ")
+
+    repouser = raw_input("repoVizz user: ")
+    reponame = raw_input("Datapack name: ")
+    repofolder = raw_input("Datapack folder: ")
 
     # Construct the HTTP request payload
     payload = {
-        'name': 'Treadmill with video ('+datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")+')',
-        'folder': 'Reactable_tests',
-        'user': 'panpap',
-        'desc': '-',
+        'name': reponame,
+        'folder': repofolder,
+        'user': repouser,
+        'desc': "recorded using repoVizzRecorder",
         'api_key': api_key,
-        'keywords': 'audio, video, coremotion',
+        'keywords': 'test, automatic',
         'computeaudiodesc': '0',
         'computemocapdesc': '0',
         'computesourceseparation': '0',
-        'file': open(filename,'rb')}
+        'file': open(datapack, 'rb')}
 
     # Open an HTTP session
     s = requests.Session()
@@ -436,11 +455,9 @@ def upload_datapack(filename):
 
     print r.text
 
-import click
 
-@click.group()
-def cli():
-    pass
+
+
 
 @cli.group()
 def record():
