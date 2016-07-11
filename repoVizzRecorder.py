@@ -76,26 +76,27 @@ def BITalino_source():
 
 import OSC
 
+def get_R_IoT_source(port=8888):
+    def R_IoT_source():
+        OSC.OSCServer.timeout = None # this is ugly, but you should be able to modify this in the constructor...
 
-def R_IoT_source():
-    OSC.OSCServer.timeout = None # this is ugly, but you should be able to modify this in the constructor...
+        yield dict(sampling_rate=1500)
 
-    yield dict(sampling_rate=1500)
+        server = OSC.OSCServer(("", port))
+        lastdata = []
 
-    server = OSC.OSCServer(("", 8888))
-    lastdata = []
+        def handle_data(addr, tags, data, client_address):
+            for n, element in enumerate(data):
+                lastdata.append(("{}/{}".format(addr,n), element))
 
-    def handle_data(addr, tags, data, client_address):
-        for n, element in enumerate(data):
-            lastdata.append(("{}/{}".format(addr,n), element))
+        server.addMsgHandler("default", handle_data)
 
-    server.addMsgHandler("default", handle_data)
-
-    while True:
-        server.handle_request()
-        for d in lastdata:
-            yield d
-        lastdata[:] = []
+        while True:
+            server.handle_request()
+            for d in lastdata:
+                yield d
+            lastdata[:] = []
+    return R_IoT_source
 
 
 def test_a_source(source):
@@ -464,8 +465,9 @@ def record():
     pass
 
 @record.command()
-def RiOT():
-    create_recorded_xml(R_IoT_source)
+@click.option('--port', default=8888, help='Port to listen for RiOT updates')
+def RiOT(port):
+    create_recorded_xml(get_R_IoT_source(port))
 
 @record.command()
 def BITalino():
@@ -566,7 +568,5 @@ def create_recorded_xml(source):
 
 
 if __name__ == "__main__":
-    # test_a_source(R_IoT_source)
-    # record_a_source(R_IoT_source)
     cli()
     # video("/home/carles/Baixades/VID_20160601_183525430.mp4", "recording_22.zip")
